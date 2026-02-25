@@ -1,0 +1,2 @@
+data.VMName,data.OSTemplate,data.CPU,data.RAM,data.Disk,data.IP1,data.IP2,data.AdditionalDisk,data.ResourcePool,data.hostname
+tungdv test,Z-Template-Ubuntu-24,2,2,50,192.168.10.199,,,tungdv-Test,tester

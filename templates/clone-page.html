@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>VM Deployment Progress</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+.logbox{
+  background:black;
+  color:#00ff88;
+  height:600px;
+  overflow:auto;
+  padding:15px;
+  font-family:monospace;
+  border-radius:8px;
+}
+.small-mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+</style>
+
+<script>
+let polling = true;
+let intervalMs = 2000;
+let timer = null;
+let ticks = 0;
+
+window.onbeforeunload = function () {
+  if (polling) {
+    return "Cloning is still running. Do not close the browser.";
+  }
+};
+
+function parseLastUpdate(text){
+  // expects: LAST_UPDATE: YYYY-MM-DD HH:MM:SS
+  const m = text.match(/LAST_UPDATE:\s*(.+)\s*/);
+  return m ? m[1].trim() : "";
+}
+
+function parseStatus(text){
+  const m = text.match(/STATUS:\s*(\w+)/);
+  return m ? m[1].trim().toLowerCase() : "";
+}
+
+function setBadge(status){
+  const badge = document.getElementById("statusBadge");
+  badge.className = "badge";
+
+  if(status === "running" || status === "staged"){
+    badge.classList.add("text-bg-warning");
+    badge.innerText = status.toUpperCase();
+  } else if(status === "done"){
+    badge.classList.add("text-bg-success");
+    badge.innerText = "DONE";
+  } else if(status === "error"){
+    badge.classList.add("text-bg-danger");
+    badge.innerText = "ERROR";
+  } else {
+    badge.classList.add("text-bg-secondary");
+    badge.innerText = (status || "UNKNOWN").toUpperCase();
+  }
+}
+
+async function loadLogs(){
+  try{
+    const res = await fetch("/logs/{{ job_id }}", { cache: "no-store" });
+    const data = await res.text();
+
+    const box = document.getElementById("logbox");
+    box.innerText = data;
+    box.scrollTop = box.scrollHeight;
+
+    ticks += 1;
+    document.getElementById("tickCount").innerText = ticks;
+
+    const lastUpdate = parseLastUpdate(data);
+    if(lastUpdate){
+      document.getElementById("lastUpdate").innerText = lastUpdate;
+    }
+
+    const status = parseStatus(data);
+    setBadge(status);
+
+    // Finish detection
+    if(data.includes("STATUS: done") || data.includes("STATUS: error")){
+      polling = false;
+      document.getElementById("backButton").style.display = "inline-block";
+      document.getElementById("warningBox").style.display = "none";
+      document.getElementById("pollInfo").innerText = "Polling stopped (finished).";
+      if(timer) clearInterval(timer);
+    }
+  } catch(e){
+    document.getElementById("pollInfo").innerText =
+      "⚠️ Could not fetch logs (network issue). Retrying...";
+  }
+}
+
+function startPolling(){
+  document.getElementById("intervalText").innerText = (intervalMs/1000) + "s";
+  timer = setInterval(loadLogs, intervalMs);
+  loadLogs(); // immediate
+}
+
+document.addEventListener("DOMContentLoaded", startPolling);
+</script>
+
+</head>
+
+<body>
+
+<nav class="navbar navbar-dark bg-primary">
+  <div class="container-fluid">
+    <span class="navbar-brand">VM Clone Running</span>
+
+    <div class="d-flex align-items-center gap-2">
+      <span class="text-white">{{ session.username }}</span>
+      <a href="/logout" class="btn btn-light btn-sm ms-2">Logout</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container mt-4">
+
+  <div id="warningBox" class="alert alert-warning">
+    ⚠️ <b>Cloning in progress.</b><br>
+    Please <b>DO NOT close</b> or refresh this browser window until deployment finishes.
+  </div>
+
+  <div class="card shadow">
+
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <div class="d-flex align-items-center gap-2">
+        <h5 class="mb-0">Clone Progress</h5>
+        <span id="statusBadge" class="badge text-bg-warning">RUNNING</span>
+      </div>
+
+      <a id="backButton" href="/index" class="btn btn-success btn-sm" style="display:none">
+        Back to Deploy Page
+      </a>
+    </div>
+
+    <div class="card-body">
+
+      <div class="d-flex flex-wrap gap-3 mb-2 small-mono text-muted">
+        <div>Update interval: <b id="intervalText"></b></div>
+        <div>Last update: <b id="lastUpdate">-</b></div>
+        <div>Fetch count: <b id="tickCount">0</b></div>
+        <div id="pollInfo">Polling logs...</div>
+      </div>
+
+      <div id="logbox" class="logbox">Starting deployment...</div>
+
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

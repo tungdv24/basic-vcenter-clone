@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<meta charset="utf-8">
+<title>vCenter Login</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+body{
+background:#f4f6f9;
+}
+
+.login-box{
+max-width:420px;
+margin:120px auto;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="login-box">
+
+<div class="card shadow">
+
+<div class="card-header text-center">
+
+<h4>vCenter Login</h4>
+
+</div>
+
+<div class="card-body">
+
+{% if error %}
+<div class="alert alert-danger">
+{{ error }}
+</div>
+{% endif %}
+
+<form method="POST">
+
+<div class="mb-3">
+<label class="form-label">vCenter Host</label>
+<input class="form-control" name="host" required placeholder="vc.example.local">
+</div>
+
+<div class="mb-3">
+<label class="form-label">Username</label>
+<input class="form-control" name="username" required>
+</div>
+
+<div class="mb-3">
+<label class="form-label">Password</label>
+<input type="password" class="form-control" name="password" required>
+</div>
+
+<button class="btn btn-primary w-100">
+
+Login
+
+</button>
+
+</form>
+
+</div>
+
+</div>
+
+</div>
+
+</body>
+</html>
