@@ -1,246 +1,328 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
+  <title>VM Deployment</title>
 
-<meta charset="utf-8">
-<title>VM Deployment</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script>
+  async function loadVcenterOptions() {
+    // Templates
+    try {
+      const tRes = await fetch("/api/templates", { cache: "no-store" });
+      const tmplStatus = document.getElementById("tmplStatus");
+      const list = document.getElementById("templateList");
 
+      if (!tRes.ok) {
+        tmplStatus.innerText = "Could not load templates (login expired?)";
+      } else {
+        const tData = await tRes.json();
+        list.innerHTML = "";
+        (tData.templates || []).forEach(name => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          list.appendChild(opt);
+        });
+        tmplStatus.innerText = `Loaded ${(tData.templates || []).length} templates`;
+      }
+    } catch (e) {
+      document.getElementById("tmplStatus").innerText = "Could not load templates";
+    }
+
+    // Resource Pools
+    try {
+      const pRes = await fetch("/api/resourcepools", { cache: "no-store" });
+      const rpStatus = document.getElementById("rpStatus");
+      const sel = document.getElementById("rpSelect");
+
+      if (!pRes.ok) {
+        rpStatus.innerText = "Could not load resource pools (login expired?)";
+      } else {
+        const pData = await pRes.json();
+        sel.innerHTML = "";
+
+        const emptyOpt = document.createElement("option");
+        emptyOpt.value = "";
+        emptyOpt.textContent = "(Default / Use template VM ResourcePool)";
+        sel.appendChild(emptyOpt);
+
+        (pData.resource_pools || []).forEach(rp => {
+          const opt = document.createElement("option");
+          opt.value = rp;
+          opt.textContent = rp;
+          sel.appendChild(opt);
+        });
+
+        rpStatus.innerText = `Loaded ${(pData.resource_pools || []).length} resource pools`;
+      }
+    } catch (e) {
+      document.getElementById("rpStatus").innerText = "Could not load resource pools";
+    }
+  }
+
+  function toggleCustomRP() {
+    const cb = document.getElementById("rpCustomCheck");
+    const sel = document.getElementById("rpSelect");
+    const wrap = document.getElementById("rpCustomWrap");
+    const custom = document.getElementById("rpCustom");
+
+    if (cb.checked) {
+      sel.disabled = true;
+      wrap.style.display = "block";      // show only when checked
+      custom.value = "";
+      custom.focus();
+    } else {
+      sel.disabled = false;
+      wrap.style.display = "none";       // hide when unchecked
+      custom.value = "";
+    }
+  }
+
+  function prepareSubmit() {
+    // If CSV uploaded -> backend ignores form anyway
+    const file = document.querySelector('input[name="simplecsv"]');
+    if (file && file.files && file.files.length > 0) return true;
+
+    const cb = document.getElementById("rpCustomCheck");
+    const sel = document.getElementById("rpSelect");
+    const custom = document.getElementById("rpCustom");
+    const hidden = document.getElementById("rpFinal");
+
+    hidden.value = cb.checked ? (custom.value || "").trim() : (sel.value || "").trim();
+    return true;
+  }
+
+  function showErrorModal(msg) {
+    const el = document.getElementById("errorModalText");
+    el.textContent = msg || "Unknown error";
+    const modal = new bootstrap.Modal(document.getElementById("errorModal"));
+    modal.show();
+  }
+
+  async function handleDeploySubmit(e) {
+    e.preventDefault(); // stop navigation to /deploy
+
+    // ensure rpFinal is set
+    prepareSubmit();
+
+    const form = document.getElementById("deployForm");
+    const btn = form.querySelector('button[type="submit"], button.btn.btn-primary');
+
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.oldText = btn.textContent;
+      btn.textContent = "Deploying...";
+    }
+
+    try {
+      const formData = new FormData(form);
+
+      const res = await fetch(form.action, {
+        method: "POST",
+        body: formData,
+        headers: { "X-Requested-With": "fetch" }
+      });
+
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      const payload = ct.includes("application/json") ? await res.json() : await res.text();
+
+      if (!res.ok) {
+        // If backend indicates redirect (e.g., login expired)
+        if (payload && payload.redirect_url) {
+          window.location.href = payload.redirect_url;
+          return;
+        }
+        const msg = (payload && payload.error) ? payload.error : (typeof payload === "string" ? payload : JSON.stringify(payload));
+        showErrorModal(msg);
+        return;
+      }
+
+      // Success -> redirect to staging
+      if (payload && payload.redirect_url) {
+        window.location.href = payload.redirect_url;
+      } else {
+        window.location.href = "/"; // fallback
+      }
+    } catch (err) {
+      showErrorModal("Request failed: " + err.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = btn.dataset.oldText || "Deploy VM";
+      }
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    loadVcenterOptions();
+    toggleCustomRP(); // ensure initial state hidden
+
+    // attach submit handler
+    const form = document.getElementById("deployForm");
+    if (form) form.addEventListener("submit", handleDeploySubmit);
+  });
+  </script>
 </head>
 
 <body>
-
-<nav class="navbar navbar-dark bg-primary">
-
-<div class="container-fluid">
-
-<span class="navbar-brand">
-VM Deployment
-</span>
-
-<div class="text-white">
-
-{{ session.username }}
-
-<a href="/logout" class="btn btn-light btn-sm ms-3">
-Logout
-</a>
-
-</div>
-
-</div>
-
-</nav>
-
-
-<div class="container mt-4">
-
-<div class="card shadow">
-
-<div class="card-header">
-<h5>Deploy VM</h5>
-</div>
-
-<div class="card-body">
-
-
-<form method="POST" action="/deploy" enctype="multipart/form-data">
-
-
-<!-- INPUT MODE INFO -->
-
-<div class="alert alert-info">
-
-<b>Input Options</b>
-
-<ul class="mb-0">
-
-<li>Fill the form below to deploy <b>one VM</b></li>
-
-<li>OR upload a CSV file to deploy <b>multiple VMs</b></li>
-
-<li>If CSV is uploaded, form values will be ignored</li>
-
-</ul>
-
-</div>
-
-
-
-<!-- CSV Upload -->
-
-<div class="mb-4">
-
-<label class="form-label">
-
-Upload Pre-configured CSV
-
-</label>
-
-<input type="file"
-class="form-control"
-name="simplecsv"
-accept=".csv">
-
-<div class="form-text">
-
-CSV headers must be:
-
-<br>
-
-<code>
-data.VMName,data.OSTemplate,data.CPU,data.RAM,data.Disk,data.IP1,data.IP2,data.AdditionalDisk,data.ResourcePool,data.hostname
-</code>
-
-</div>
-
-</div>
-
-
-<hr class="mb-4">
-
-
-
-<!-- SINGLE VM FORM -->
-
-<h6 class="mb-3">
-Single VM Deployment
-</h6>
-
-
-<div class="row mb-3">
-
-<div class="col">
-
-<label class="form-label">VM Name</label>
-
-<input class="form-control"
-name="data.VMName">
-
-</div>
-
-<div class="col">
-
-<label class="form-label">Hostname</label>
-
-<input class="form-control"
-name="data.hostname">
-
-</div>
-
-</div>
-
-
-
-<div class="row mb-3">
-
-<div class="col">
-
-<label class="form-label">Template</label>
-
-<input class="form-control"
-name="data.OSTemplate">
-
-</div>
-
-<div class="col">
-
-<label class="form-label">Resource Pool</label>
-
-<input class="form-control"
-name="data.ResourcePool">
-
-</div>
-
-</div>
-
-
-
-<div class="row mb-3">
-
-<div class="col">
-
-<label class="form-label">CPU</label>
-
-<input class="form-control"
-name="data.CPU">
-
-</div>
-
-<div class="col">
-
-<label class="form-label">RAM (GB)</label>
-
-<input class="form-control"
-name="data.RAM">
-
-</div>
-
-<div class="col">
-
-<label class="form-label">Disk (GB)</label>
-
-<input class="form-control"
-name="data.Disk">
-
-</div>
-
-<div class="col">
-
-<label class="form-label">Additional Disk</label>
-
-<input class="form-control"
-name="data.AdditionalDisk">
-
-</div>
-
-</div>
-
-
-
-<div class="row mb-3">
-
-<div class="col">
-
-<label class="form-label">NIC1 IP</label>
-
-<input class="form-control"
-name="data.IP1">
-
-</div>
-
-<div class="col">
-
-<label class="form-label">NIC2 IP</label>
-
-<input class="form-control"
-name="data.IP2">
-
-</div>
-
-</div>
-
-
-
-<div class="text-center mt-4">
-
-<button class="btn btn-primary btn-lg">
-
-Deploy VM
-
-</button>
-
-</div>
-
-
-</form>
-
-</div>
-
-</div>
-
-</div>
-
+  <nav class="navbar navbar-dark bg-primary">
+    <div class="container-fluid">
+      <span class="navbar-brand">VM Deployment</span>
+
+      <div class="text-white">
+        {{ session.username }}
+        <a href="/logout" class="btn btn-light btn-sm ms-3">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container mt-4">
+    <div class="card shadow">
+      <div class="card-header">
+        <h5>Deploy VM</h5>
+      </div>
+
+      <div class="card-body">
+        <form id="deployForm" method="POST" action="/deploy" enctype="multipart/form-data">
+
+          <div class="alert alert-info">
+            <b>Input Options</b>
+            <ul class="mb-0">
+              <li>Fill the form below to deploy <b>one VM</b></li>
+              <li>OR upload a CSV file to deploy <b>multiple VMs</b></li>
+              <li>If CSV is uploaded, form values will be ignored</li>
+            </ul>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label">Upload Pre-configured CSV</label>
+            <input type="file" class="form-control" name="simplecsv" accept=".csv">
+
+            <div class="form-text">
+              CSV headers must be:<br>
+              <code>
+                data.VMName,data.OSTemplate,data.CPU,data.RAM,data.Disk,data.IP1,data.IP2,data.AdditionalDisk,data.ResourcePool,data.hostname
+              </code>
+            </div>
+          </div>
+
+          <hr class="mb-4">
+
+          <h6 class="mb-3">Single VM Deployment</h6>
+
+          <div class="row mb-3">
+            <div class="col">
+              <label class="form-label">VM Name</label>
+              <input class="form-control" name="data.VMName">
+            </div>
+
+            <div class="col">
+              <label class="form-label">Hostname</label>
+              <input class="form-control" name="data.hostname">
+            </div>
+          </div>
+
+          <div class="row mb-3">
+            <div class="col">
+              <label class="form-label">Template</label>
+              <input class="form-control"
+                     name="data.OSTemplate"
+                     list="templateList"
+                     placeholder="Type or select template">
+              <datalist id="templateList"></datalist>
+              <div class="form-text" id="tmplStatus">Loading templates...</div>
+            </div>
+
+            <div class="col">
+              <label class="form-label">Resource Pool</label>
+
+              <select class="form-select" id="rpSelect">
+                <option value="">(Loading...)</option>
+              </select>
+
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="rpCustomCheck" onchange="toggleCustomRP()">
+                <label class="form-check-label" for="rpCustomCheck">
+                  Enter custom ResourcePool manually
+                </label>
+              </div>
+
+              <div id="rpCustomWrap" style="display:none;">
+                <input class="form-control mt-2"
+                       id="rpCustom"
+                       type="text"
+                       placeholder="Custom ResourcePool name">
+              </div>
+
+              <div class="form-text" id="rpStatus">Loading resource pools...</div>
+
+              <input type="hidden" id="rpFinal" name="data.ResourcePool" value="">
+            </div>
+          </div>
+
+          <div class="row mb-3">
+            <div class="col">
+              <label class="form-label">CPU</label>
+              <input class="form-control" name="data.CPU">
+            </div>
+
+            <div class="col">
+              <label class="form-label">RAM (GB)</label>
+              <input class="form-control" name="data.RAM">
+            </div>
+
+            <div class="col">
+              <label class="form-label">Disk (GB)</label>
+              <input class="form-control" name="data.Disk">
+            </div>
+
+            <div class="col">
+              <label class="form-label">Additional Disk</label>
+              <input class="form-control" name="data.AdditionalDisk">
+            </div>
+          </div>
+
+          <div class="row mb-3">
+            <div class="col">
+              <label class="form-label">NIC1 IP</label>
+              <input class="form-control" name="data.IP1">
+            </div>
+
+            <div class="col">
+              <label class="form-label">NIC2 IP</label>
+              <input class="form-control" name="data.IP2">
+            </div>
+          </div>
+
+          <div class="text-center mt-4">
+            <button type="submit" class="btn btn-primary btn-lg">Deploy VM</button>
+          </div>
+
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error Modal -->
+  <div class="modal fade" id="errorModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Deploy failed</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <pre id="errorModalText" class="mb-0" style="white-space:pre-wrap; word-break:break-word;"></pre>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS (required for modal) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -7,7 +7,7 @@ from datetime import datetime
 import ssl
 import atexit
 from datetime import timedelta
-
+import json
 
 from flask import (
     Flask,
@@ -19,7 +19,8 @@ from flask import (
     abort,
     Response,
     send_file,
-    flash
+    flash,
+    jsonify
 )
 
 from pyVim.connect import SmartConnect, Disconnect
@@ -359,6 +360,60 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+@app.route("/api/templates", methods=["GET"])
+def api_templates():
+    if not require_login():
+        return Response(json.dumps({"error": "not_logged_in"}), status=401, mimetype="application/json")
+
+    vcenter_host = session.get("vcenter_host")
+    vcenter_user = session.get("vcenter_user")
+    vcenter_pass = session.get("vcenter_pass")
+
+    try:
+        si = vc_connect(vcenter_host, vcenter_user, vcenter_pass)
+        content = si.RetrieveContent()
+
+        # List VMs that contain "template" in name (case-insensitive)
+        view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
+        try:
+            names = []
+            for vm in view.view:
+                n = (vm.name or "")
+                if "template" in n.lower():
+                    names.append(n)
+        finally:
+            view.Destroy()
+
+        names = sorted(set(names), key=lambda x: x.lower())
+        return Response(json.dumps({"templates": names}), mimetype="application/json")
+
+    except Exception as e:
+        return Response(json.dumps({"error": str(e)}), status=500, mimetype="application/json")
+
+
+@app.route("/api/resourcepools", methods=["GET"])
+def api_resourcepools():
+    if not require_login():
+        return Response(json.dumps({"error": "not_logged_in"}), status=401, mimetype="application/json")
+
+    vcenter_host = session.get("vcenter_host")
+    vcenter_user = session.get("vcenter_user")
+    vcenter_pass = session.get("vcenter_pass")
+
+    try:
+        si = vc_connect(vcenter_host, vcenter_user, vcenter_pass)
+        content = si.RetrieveContent()
+
+        view = content.viewManager.CreateContainerView(content.rootFolder, [vim.ResourcePool], True)
+        try:
+            pools = sorted(set([rp.name for rp in view.view if rp and rp.name]), key=lambda x: x.lower())
+        finally:
+            view.Destroy()
+
+        return Response(json.dumps({"resource_pools": pools}), mimetype="application/json")
+
+    except Exception as e:
+        return Response(json.dumps({"error": str(e)}), status=500, mimetype="application/json")
 
 @app.route("/index", methods=["GET"])
 def index():
@@ -366,6 +421,8 @@ def index():
         return redirect(url_for("login"))
     return render_template("index.html")
 
+def is_fetch_request():
+    return request.headers.get("X-Requested-With") == "fetch"
 
 @app.route("/deploy", methods=["POST"])
 def deploy():
@@ -377,10 +434,16 @@ def deploy():
     Uses backend data/ip_ranges.csv
     """
     if not require_login():
+        # For fetch: tell frontend to redirect to login
+        if is_fetch_request():
+            return jsonify({"ok": False, "error": "Not logged in", "redirect_url": url_for("login")}), 401
         return redirect(url_for("login"))
 
     if not os.path.exists(IP_RANGES_PATH):
-        return "Backend ip_ranges.csv missing: data/ip_ranges.csv", 500
+        msg = "Backend ip_ranges.csv missing: data/ip_ranges.csv"
+        if is_fetch_request():
+            return jsonify({"ok": False, "error": msg}), 500
+        return msg, 500
 
     job_id = str(uuid.uuid4())[:8]
     job_upload_dir = os.path.join(UPLOAD_DIR, job_id)
@@ -400,14 +463,20 @@ def deploy():
     uploaded = request.files.get("simplecsv")
     if uploaded and uploaded.filename:
         if not uploaded.filename.lower().endswith(".csv"):
-            return "Uploaded file must be a .csv", 400
+            msg = "Uploaded file must be a .csv"
+            if is_fetch_request():
+                return jsonify({"ok": False, "error": msg}), 400
+            return msg, 400
 
         uploaded.save(simple_csv_path)
 
         try:
             validate_simple_csv_headers(simple_csv_path)
         except Exception as e:
-            return f"Invalid uploaded CSV: {e}", 400
+            msg = f"Invalid uploaded CSV: {e}"
+            if is_fetch_request():
+                return jsonify({"ok": False, "error": msg}), 400
+            return msg, 400
     else:
         # Otherwise build single-VM simple.csv from form
         write_simple_csv(simple_csv_path, request.form)
@@ -416,7 +485,10 @@ def deploy():
     try:
         convert_simple_csv_to_deploy_csv(simple_csv_path, IP_RANGES_PATH, converted_csv_path)
     except Exception as e:
-        return f"Convert failed: {e}", 500
+        msg = f"Convert failed: {e}"
+        if is_fetch_request():
+            return jsonify({"ok": False, "error": msg}), 400
+        return msg, 500  # keep your old behavior for normal submit
 
     with jobs_lock:
         jobs[job_id] = {
@@ -429,6 +501,10 @@ def deploy():
             "validation_status": "pending",
             "validation_errors": [],
         }
+
+    # Success:
+    if is_fetch_request():
+        return jsonify({"ok": True, "redirect_url": url_for("staging", job_id=job_id)}), 200
 
     return redirect(url_for("staging", job_id=job_id))
 
