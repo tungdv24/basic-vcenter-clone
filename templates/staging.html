@@ -8,7 +8,6 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 
 <style>
-
 .table-container{
 max-height:75vh;
 overflow:auto;
@@ -16,7 +15,6 @@ border:1px solid #ccc;
 border-radius:6px;
 }
 
-/* Sticky header */
 thead th{
 position:sticky;
 top:0;
@@ -24,10 +22,7 @@ background:#f8f9fa;
 z-index:5;
 }
 
-/* Better CSV readability */
-table{
-font-size:14px;
-}
+table{ font-size:14px; }
 
 td, th{
 white-space:nowrap;
@@ -35,15 +30,24 @@ border:1px solid #dee2e6 !important;
 padding:6px 10px !important;
 }
 
-/* Row zebra */
-tbody tr:nth-child(even){
-background:#fafafa;
+tbody tr:nth-child(even){ background:#fafafa; }
+tbody tr:hover{ background:#e9f3ff; }
+
+.cell-wrap{
+display:flex;
+align-items:center;
+gap:8px;
 }
 
-/* Hover highlight */
-tbody tr:hover{
-background:#e9f3ff;
+.icon{
+display:inline-block;
+width:18px;
+text-align:center;
+font-weight:700;
 }
+
+.icon.ok{ color:#198754; }
+.icon.bad{ color:#dc3545; }
 
 </style>
 
@@ -52,143 +56,153 @@ background:#e9f3ff;
 <body>
 
 <nav class="navbar navbar-dark bg-primary">
+  <div class="container-fluid">
+    <span class="navbar-brand">Staging - Converted CSV Preview</span>
 
-<div class="container-fluid">
+    <div class="text-white">
+      {{ session.username }}
 
-<span class="navbar-brand">
-
-Staging - Converted CSV Preview
-
-</span>
-
-<div class="text-white">
-
-{{ session.username }}
-
-<a href="/index" class="btn btn-light btn-sm ms-3">
-Back
-</a>
-
-<a href="/logout" class="btn btn-light btn-sm ms-2">
-Logout
-</a>
-
-</div>
-
-</div>
-
+      <a href="/index" class="btn btn-light btn-sm ms-3">Back</a>
+      <a href="/logout" class="btn btn-light btn-sm ms-2">Logout</a>
+    </div>
+  </div>
 </nav>
-
 
 
 <div class="container mt-4">
 
-<div class="d-flex justify-content-between mb-3">
-
-<div>
-
-<h5>Converted CSV Preview</h5>
-
-<div class="text-muted">
-
-Rows: <b>{{ rows|length }}</b> |
-Columns: <b>{{ columns|length }}</b>
-
-</div>
-
-</div>
-
-<div>
-
-<a href="{{ download_url }}" class="btn btn-outline-secondary">
-
-Download CSV
-
-</a>
-
-<form method="POST"
-action="{{ confirm_url }}"
-style="display:inline">
-
-<button class="btn btn-success">
-
-Confirm & Deploy
-
-</button>
-
-</form>
-
-</div>
-
-</div>
+  <!-- Validation summary -->
+  {% if validation_status == "pending" %}
+    <div class="alert alert-secondary">
+      Validating with vCenter... please refresh in a moment.
+    </div>
+  {% elif validation_status == "pass" %}
+    <div class="alert alert-success">
+      ✅ Validation PASSED: Source_vm / Networks / ResourcePool exist in vCenter.
+    </div>
+  {% elif validation_status == "fail" %}
+    <div class="alert alert-danger">
+      ❌ Validation FAILED. Fix these items before deploying:
+      <ul class="mb-0 mt-2">
+        {% for e in validation_errors %}
+          <li>{{ e }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
 
 
+  <div class="d-flex justify-content-between mb-3">
+    <div>
+      <h5>Converted CSV Preview</h5>
+      <div class="text-muted">
+        Rows: <b>{{ rows|length }}</b> | Columns: <b>{{ columns|length }}</b>
+      </div>
+    </div>
 
-<div class="card shadow">
+    <div>
+      <a href="{{ download_url }}" class="btn btn-outline-secondary">
+        Download CSV
+      </a>
 
-<div class="card-body p-2">
-
-
-<div class="table-container">
-
-<table class="table table-bordered table-sm mb-0">
-
-<thead>
-
-<tr>
-
-<th>#</th>
-
-{% for col in columns %}
-
-<th>
-
-{{ col }}
-
-</th>
-
-{% endfor %}
-
-</tr>
-
-</thead>
+      <form method="POST" action="{{ confirm_url }}" style="display:inline">
+        <button class="btn btn-success"
+                {% if validation_status != "pass" %}disabled{% endif %}>
+          Confirm & Deploy
+        </button>
+      </form>
+    </div>
+  </div>
 
 
-<tbody>
+  <div class="card shadow">
+    <div class="card-body p-2">
 
-{% for row in rows %}
+      <div class="table-container">
+        <table class="table table-bordered table-sm mb-0">
 
-<tr>
+          <thead>
+            <tr>
+              <th>#</th>
+              {% for col in columns %}
+                <th>{{ col }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
 
-<td>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td>{{ loop.index }}</td>
 
-{{ loop.index }}
+                {% for col in columns %}
 
-</td>
+                  {% if col == "Source_vm" %}
+                    {% set v = (row.get(col) or "") %}
+                    <td>
+                      <div class="cell-wrap">
+                        <span>{{ v }}</span>
+                        {% if v and vc_checks is defined and vc_checks %}
+                          {% set ok = vc_checks["source_vm_ok"].get(v) %}
+                          {% if ok is sameas true %}
+                            <span class="icon ok">✓</span>
+                          {% elif ok is sameas false %}
+                            <span class="icon bad">✗</span>
+                          {% endif %}
+                        {% endif %}
+                      </div>
+                    </td>
 
-{% for col in columns %}
+                  {% elif col == "Nic1_network" or col == "Nic2_network" %}
+                    {% set v = (row.get(col) or "") %}
+                    <td>
+                      <div class="cell-wrap">
+                        <span>{{ v }}</span>
+                        {% if v and vc_checks is defined and vc_checks %}
+                          {% set ok = vc_checks["net_ok"].get(v) %}
+                          {% if ok is sameas true %}
+                            <span class="icon ok">✓</span>
+                          {% elif ok is sameas false %}
+                            <span class="icon bad">✗</span>
+                          {% endif %}
+                        {% endif %}
+                      </div>
+                    </td>
 
-<td>
+                  {% elif col == "ResourcePool" %}
+                    {% set v = (row.get(col) or "") %}
+                    <td>
+                      <div class="cell-wrap">
+                        <span>{{ v }}</span>
+                        {% if v and vc_checks is defined and vc_checks %}
+                          {% set ok = vc_checks["pool_ok"].get(v) %}
+                          {% if ok is sameas true %}
+                            <span class="icon ok">✓</span>
+                          {% elif ok is sameas false %}
+                            <span class="icon bad">✗</span>
+                          {% endif %}
+                        {% endif %}
+                      </div>
+                    </td>
 
-{{ row[col] }}
+                  {% else %}
+                    <td>{{ row.get(col, "") }}</td>
+                  {% endif %}
 
-</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
 
-{% endfor %}
+        </table>
+      </div>
 
-</tr>
+      <div class="mt-2 text-muted small">
+        ✓ = found in vCenter &nbsp;&nbsp; ✗ = not found
+      </div>
 
-{% endfor %}
-
-</tbody>
-
-</table>
-
-</div>
-
-</div>
-
-</div>
+    </div>
+  </div>
 
 </div>
 

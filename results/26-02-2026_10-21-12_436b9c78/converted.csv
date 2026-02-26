@@ -1,0 +1,2 @@
+Name,Source_vm,CPU,RAM,Disk,Nic1_network,Nic1_ip,Nic1_subnet,Nic2_network,Nic2_ip,Nic2_subnet,Gateway,DNS,Additional_Disk,ResourcePool,hostname
+tungdv-TMT,Z-Template-Ubuntu-22-192-1,2,2,50,VM Network,192.168.10.78,24,,,,192.168.10.1,"8.8.8.8,208.67.220.220",,tungdv-Test-192,tmt
